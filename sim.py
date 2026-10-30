@@ -2,7 +2,6 @@ import math
 import cmath
 import matplotlib.pyplot as plt
 import numpy as np
-# from perlin_noise import PerlinNoise
 import vnoise
 
 
@@ -14,35 +13,43 @@ class FBG:
         self.base_refractive_index = base_refractive_index
         self.transfer_matrix = None
         self.grating_period = blocked_wavelength / (2 * math.pi)
+        self.refraction_lookup = dict()
         if seed is not None:
             self.noise_fun = vnoise.Noise(seed)
         else:
             self.noise_fun = None
 
     def get_refractive_index(self, length_z):
+        if length_z in self.refraction_lookup:
+            return self.refraction_lookup[length_z]
         if self.noise_fun is not None:
             noise = self.noise_fun.noise1(length_z * 1000000, octaves=4, persistence=0.7) * 1 * (
                 self.max_refractive_index - self.base_refractive_index)
         else:
             noise = 0
-        return self.base_refractive_index + math.sin(length_z / self.grating_period) * (
+        refractive_index = self.base_refractive_index + math.sin(length_z / self.grating_period) * (
                 self.max_refractive_index - self.base_refractive_index) + noise
+        self.refraction_lookup.update({length_z: refractive_index})
+        return refractive_index
 
     def get_transfer_matrix(self, step,frequency):
-        transfer_matrix = np.array([[1, 0], [0, 1]], dtype=np.complex128)
+        transfer_matrix = np.array([[1, 0], [0, 1]], dtype=np.complex64)
         c = 299792458
+        m_matrix = np.array([[cmath.exp(1j * 2 * math.pi * frequency / c * step), 0],
+                             [0, cmath.exp(-1j * 2 * math.pi * frequency / c * step)]], dtype=np.complex64)
         for val in np.linspace(0, stop=self.length, num=int(self.length / step), endpoint=False):
             n = self.get_refractive_index(val)
             n_plus_one = self.get_refractive_index(val + step)
             i_matrix = np.array([[n + n_plus_one, n - n_plus_one], [n - n_plus_one, n + n_plus_one]],
-                                  dtype=np.float64)* (1 / (2 * n))
-            m_matrix = np.array([[cmath.exp(1j*2*math.pi*frequency/c*step), 0], [0, cmath.exp(-1j*2*math.pi*frequency/c*step)]], dtype=np.complex64)
+                                  dtype=np.complex64)* (1 / (2 * n))
             transfer_matrix = np.dot(transfer_matrix, i_matrix)
             transfer_matrix = np.dot(transfer_matrix, m_matrix)
 
         return transfer_matrix
 
-    def get_reflection(self):
+    def get_reflection_db(self,step,frequency):
+        transfer_matrix = self.get_transfer_matrix(step,frequency)
+        return np.log10(np.abs(transfer_matrix[1, 0] / transfer_matrix[0, 0])) * 10
         pass
 
 
@@ -74,9 +81,10 @@ if __name__ == "__main__":
     transfer_matrix = clean_FBG.get_transfer_matrix(0.000001,5000000000)
     print(transfer_matrix)
     print(transfer_matrix[1,0]/transfer_matrix[0,0])
+    print(clean_FBG.get_reflection_db(0.000001, 5000000000))
     print(np.abs(transfer_matrix[1,0]/transfer_matrix[0,0]))
     transfer_matrix = clean_FBG.get_transfer_matrix(0.000001, c/blocked_wavelength)
     print(transfer_matrix)
     print(transfer_matrix[1, 0] / transfer_matrix[0, 0])
-    print(np.abs(transfer_matrix[1, 0] / transfer_matrix[0, 0]))
+    print(clean_FBG.get_reflection_db(0.000001, c/blocked_wavelength))
     # -47.940 dB bez -75.219 dB z
